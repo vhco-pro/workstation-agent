@@ -30,10 +30,16 @@ checksum:
   name_template: '{{ .ProjectName }}_{{ .Version }}_SHA256SUMS'
   algorithm: sha256
 
-# NOTE: checksum signing is intentionally omitted — the EC2 bootstrap verifies the
-# binary against SHA256SUMS (integrity), and the VH & Co signing key's passphrase
-# is unavailable for CI. Re-add a `signs:` block with a passphrase-less key to
-# also sign the checksums for authenticity.
+signs:
+  - artifacts: checksum
+    args:
+      - "--batch"
+      - "--local-user"
+      - "{{ .Env.GPG_FINGERPRINT }}"
+      - "--output"
+      - "${signature}"
+      - "--detach-sign"
+      - "${artifact}"
 
 release:
   draft: false
