@@ -1,0 +1,100 @@
+# Single-job release on push to main — no GitHub App / bot, just the repo's GITHUB_TOKEN.
+#
+# GitVersion computes the next version from conventional-commit messages. Only when it's a NEW
+# version (a feat:/fix:/etc. landed) do we tag it (reusable michielvha/gitversion-tag-action),
+# build the static linux/amd64 binary, and publish a vX.Y.Z GitHub Release with the binary +
+# sha256. The EC2 bootstrap fetches the binary from the latest release.
+
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '.gitignore'
+      - 'README.md'
+      - 'LICENSE'
+      - 'docs/**'
+      - 'deploy/**'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # tag + create the GitHub Release
+    steps:
+      - name: Checkout (full history for GitVersion)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Vet + test
+        run: |
+          go vet ./...
+          go test ./...
+
+      - name: Setup GitVersion
+        uses: gittools/actions/gitversion/setup@v0
+        with:
+          versionSpec: '6.0.0'
+
+      - name: Compute version
+        id: gv
+        uses: gittools/actions/gitversion/execute@v0
+        with:
+          useConfigFile: true
+          configFilePath: gitversion.yml
+
+      - name: Gate on a version bump
+        id: ver
+        run: |
+          VERSION="${{ steps.gv.outputs.semVer }}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          git fetch --tags --force
+          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
+            echo "bump=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No version bump (v$VERSION already released) — skipping."
+          else
+            echo "bump=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Releasing v$VERSION"
+          fi
+
+      - name: Tag with GitVersion (reusable action)
+        if: steps.ver.outputs.bump == 'true'
+        uses: michielvha/gitversion-tag-action@71eb5b08849c8867ee613dc9c929af41d145d91d # main snapshot 2026-05-23
+        with:
+          configFilePath: gitversion.yml
+          prefix: 'v'
+
+      - name: Build static linux/amd64 binary
+        if: steps.ver.outputs.bump == 'true'
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          mkdir -p dist
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
+            -ldflags "-s -w -X main.version=${VERSION}" \
+            -o dist/workstation-agent_linux_amd64 ./cmd/workstation-agent
+          ( cd dist && sha256sum workstation-agent_linux_amd64 > workstation-agent_linux_amd64.sha256 )
+
+      - name: Publish GitHub Release
+        if: steps.ver.outputs.bump == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          gh release create "v${VERSION}" \
+            --title "workstation-agent ${VERSION}" \
+            --generate-notes \
+            dist/workstation-agent_linux_amd64 \
+            dist/workstation-agent_linux_amd64.sha256
