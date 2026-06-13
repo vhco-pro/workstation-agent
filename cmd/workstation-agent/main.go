@@ -18,6 +18,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/vhco-pro/workstation-agent/internal/authz"
 	"github.com/vhco-pro/workstation-agent/internal/identity"
 	"github.com/vhco-pro/workstation-agent/internal/idle"
 	"github.com/vhco-pro/workstation-agent/internal/session"
@@ -41,6 +42,12 @@ func main() {
 	// Provisioning backend auto-detected (D1): directory-joined → sssd, else local.
 	prov := session.DetectProvisioner(context.Background(), session.DefaultRunner, log)
 	mgr := session.NewManager(prov, session.DefaultRunner, log)
+	// Per-user resource caps (MU-10); unset = unlimited.
+	mgr.Limits = session.Limits{
+		CPUQuota:  os.Getenv("WSA_USER_CPU_QUOTA"),
+		MemoryMax: os.Getenv("WSA_USER_MEMORY_MAX"),
+		TasksMax:  os.Getenv("WSA_USER_TASKS_MAX"),
+	}
 
 	// ensure-session is authenticated by the same token the verifier validates,
 	// so a caller can only provision their own session.
@@ -52,6 +59,13 @@ func main() {
 		return identity.FromARN(arn)
 	}
 	ensure := session.NewHandler(authn, mgr, log)
+
+	// Authorization gate (MU-09 / D3): default allows any validated identity;
+	// tighten with WSA_AUTHZ=group:<name> or allowlist:<path>. Both entry points
+	// (token verify + ensure-session) enforce it.
+	authorizer := authz.Parse(os.Getenv("WSA_AUTHZ"), session.DefaultRunner)
+	v.Authz = authorizer
+	ensure.Authz = authorizer
 
 	mux := http.NewServeMux()
 	mux.Handle("/validate-authentication-token", v) // DCV posts the token here

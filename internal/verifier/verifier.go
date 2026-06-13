@@ -23,6 +23,8 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+
+	"github.com/vhco-pro/workstation-agent/internal/authz"
 )
 
 // stsHostRE matches only the legitimate STS regional or global endpoints. The
@@ -84,6 +86,7 @@ func VerifyToken(ctx context.Context, client *http.Client, token string) (string
 type Handler struct {
 	Client *http.Client
 	Map    MapIdentity
+	Authz  authz.Authorizer // nil => allow any validated identity
 	Log    *slog.Logger
 }
 
@@ -122,6 +125,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.Log.Warn("identity mapping failed", "arn", arn, "err", err)
 		writeDeny(w, "identity not mappable")
 		return
+	}
+	if h.Authz != nil {
+		if ok, err := h.Authz.Allowed(r.Context(), user); err != nil || !ok {
+			h.Log.Warn("authorization denied", "user", user, "err", err)
+			writeDeny(w, "not authorized for this workstation")
+			return
+		}
 	}
 	// DCV authorizes the connection when the returned username is permitted on
 	// the requested session. The session is named after its owner, so a verified

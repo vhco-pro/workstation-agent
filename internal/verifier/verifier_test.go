@@ -115,7 +115,21 @@ func TestHandler_DCVContract(t *testing.T) {
 			t.Errorf("got %q, want deny", body)
 		}
 	})
+
+	t.Run("valid token but authz denies -> no", func(t *testing.T) {
+		denying := NewHandler(srv.Client(), identity.FromARN, nil)
+		denying.Authz = denyAll{}
+		rr := postForm(denying, url.Values{"sessionId": {"alice"}, "authenticationToken": {token}})
+		if body := rr.Body.String(); !strings.Contains(body, `result="no"`) {
+			t.Errorf("got %q, want deny when authz refuses", body)
+		}
+	})
 }
+
+// denyAll implements authz.Authorizer and refuses everyone.
+type denyAll struct{}
+
+func (denyAll) Allowed(context.Context, string) (bool, error) { return false, nil }
 
 func postForm(h http.Handler, v url.Values) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(http.MethodPost, "/validate-authentication-token", strings.NewReader(v.Encode()))

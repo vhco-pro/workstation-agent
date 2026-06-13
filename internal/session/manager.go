@@ -9,9 +9,10 @@ import (
 // Manager ensures a per-user virtual DCV session exists. A session is named
 // after its owner, so each verified user can only ever reach their own.
 type Manager struct {
-	Prov Provisioner
-	Run  Runner
-	Log  *slog.Logger
+	Prov   Provisioner
+	Run    Runner
+	Log    *slog.Logger
+	Limits Limits // per-user resource caps (MU-10); zero value = unlimited
 }
 
 // NewManager wires a Manager. A nil runner uses DefaultRunner; a nil logger
@@ -33,6 +34,11 @@ func NewManager(prov Provisioner, run Runner, log *slog.Logger) *Manager {
 func (m *Manager) EnsureSession(ctx context.Context, username string) (string, error) {
 	if err := m.Prov.EnsureUser(ctx, username); err != nil {
 		return "", err
+	}
+	// Apply per-user resource caps (MU-10). Non-fatal: a limits hiccup must not
+	// block the user from logging in.
+	if err := ApplyUserLimits(ctx, m.Run, username, m.Limits); err != nil {
+		m.Log.Warn("applying user limits failed (non-fatal)", "user", username, "err", err)
 	}
 	if m.sessionExists(ctx, username) {
 		return username, nil

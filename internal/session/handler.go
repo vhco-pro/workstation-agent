@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+
+	"github.com/vhco-pro/workstation-agent/internal/authz"
 )
 
 // AuthN verifies a presigned-identity token and returns the verified Linux
@@ -18,6 +20,7 @@ type AuthN func(ctx context.Context, token string) (string, error)
 type Handler struct {
 	AuthN AuthN
 	Mgr   *Manager
+	Authz authz.Authorizer // nil => allow any validated identity
 	Log   *slog.Logger
 }
 
@@ -43,6 +46,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.Log.Warn("ensure-session: authentication failed", "err", err)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
+	}
+	if h.Authz != nil {
+		if ok, err := h.Authz.Allowed(r.Context(), user); err != nil || !ok {
+			h.Log.Warn("ensure-session: authorization denied", "user", user, "err", err)
+			http.Error(w, "not authorized for this workstation", http.StatusForbidden)
+			return
+		}
 	}
 	sid, err := h.Mgr.EnsureSession(r.Context(), user)
 	if err != nil {

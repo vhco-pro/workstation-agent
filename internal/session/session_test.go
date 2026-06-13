@@ -133,6 +133,47 @@ func TestManager_EnsureSession(t *testing.T) {
 	})
 }
 
+func TestApplyUserLimits(t *testing.T) {
+	t.Run("no limits -> no systemctl call", func(t *testing.T) {
+		f := &fakeRunner{}
+		if err := ApplyUserLimits(context.Background(), f.run, "alice", Limits{}); err != nil {
+			t.Fatal(err)
+		}
+		if f.called("systemctl", "set-property") {
+			t.Error("empty limits must not call systemctl")
+		}
+	})
+
+	t.Run("applies configured caps to the user's slice", func(t *testing.T) {
+		f := &fakeRunner{respond: func(name string, args []string) ([]byte, error) {
+			if name == "id" {
+				return []byte("1002\n"), nil
+			}
+			return nil, nil
+		}}
+		err := ApplyUserLimits(context.Background(), f.run, "alice",
+			Limits{CPUQuota: "200%", MemoryMax: "4G", TasksMax: "4096"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var sc *call
+		for i := range f.calls {
+			if f.calls[i].name == "systemctl" {
+				sc = &f.calls[i]
+			}
+		}
+		if sc == nil {
+			t.Fatal("expected a systemctl set-property call")
+		}
+		joined := strings.Join(sc.args, " ")
+		for _, want := range []string{"set-property", "user-1002.slice", "CPUQuota=200%", "MemoryMax=4G", "TasksMax=4096"} {
+			if !strings.Contains(joined, want) {
+				t.Errorf("set-property args missing %q: %v", want, sc.args)
+			}
+		}
+	})
+}
+
 func TestDetectProvisioner(t *testing.T) {
 	sssd := &fakeRunner{} // systemctl is-active succeeds -> sssd
 	if got := DetectProvisioner(context.Background(), sssd.run, testLogger()).Name(); got != "sssd" {
@@ -190,4 +231,21 @@ func TestEnsureHandler(t *testing.T) {
 			t.Errorf("status = %d, want 405", rr.Code)
 		}
 	})
+
+	t.Run("authenticated but authz denies -> 403 (no provisioning)", func(t *testing.T) {
+		hd := NewHandler(authn, mgr, testLogger())
+		hd.Authz = denyAuthz{}
+		req := httptest.NewRequest(http.MethodPost, "/ensure-session", strings.NewReader(url.Values{"authenticationToken": {"good"}}.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		hd.ServeHTTP(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("status = %d, want 403 when authz denies", rec.Code)
+		}
+	})
 }
+
+// denyAuthz implements authz.Authorizer and refuses everyone.
+type denyAuthz struct{}
+
+func (denyAuthz) Allowed(context.Context, string) (bool, error) { return false, nil }
