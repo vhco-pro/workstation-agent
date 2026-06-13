@@ -59,7 +59,7 @@ macOS client (ssm-connect)                 EC2 host (this agent)
 Two HTTP surfaces, both reached only over the localhost SSM tunnel (never internet-exposed):
 
 - **`/validate-authentication-token`** — the DCV [`auth-token-verifier`](https://docs.aws.amazon.com/dcv/latest/adminguide/external-authentication.html) endpoint. Implements the documented contract: form POST `sessionId&authenticationToken&clientAddress` → XML `<auth result="yes"><username>…</username></auth>`. Validates the presigned token by re-executing it against STS (with an SSRF guard restricting the URL to real STS endpoints).
-- **`/ensure-session`** — provisions the Linux user + home (pluggable `local` / `sssd` backend) and runs `dcv create-session --type virtual --owner <u> --user <u>` as root if the session isn't already up. Called by the client *before* connecting, because DCV external auth bypasses PAM and there is no login hook to lazily create the session.
+- **`/ensure-session`** — provisions the Linux user + home (pluggable `local` / `sssd` backend, auto-detected) and runs `dcv create-session --type virtual --owner <u> --user <u>` as root if the session isn't already up. **Authenticated by the same presigned token**, so a caller can only ever provision their own session. Called by the client *before* connecting, because DCV external auth bypasses PAM and there is no login hook to lazily create the session.
 
 ## Design principles
 
@@ -74,7 +74,7 @@ Two HTTP surfaces, both reached only over the localhost SSM tunnel (never intern
 cmd/workstation-agent/   entrypoint (HTTP server wiring)
 internal/identity/       map verified STS ARN → Linux username (shared rule with the client)
 internal/verifier/       DCV auth-token-verifier contract + presigned-token re-execution (SSRF-guarded)
-internal/session/        ensure user/home/virtual-session  (in progress)
+internal/session/        provisioning backends (local/sssd, auto-detected) + ensure-session + create-session
 deploy/                  systemd unit
 ```
 

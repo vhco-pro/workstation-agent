@@ -2,9 +2,10 @@
 # Install: copy the binary to /usr/local/bin/workstation-agent and this unit to
 # /etc/systemd/system/, then: systemctl enable --now workstation-agent
 #
-# The token verifier binds to loopback only and is reached over the client's SSM
-# port-forward. Session provisioning (the /ensure-session endpoint, coming next)
-# needs root to impersonate users for `dcv create-session`, hence User=root.
+# Both endpoints (/validate-authentication-token and /ensure-session) bind to
+# loopback only and are reached over the client's SSM port-forward. Session
+# provisioning needs root to impersonate users for `dcv create-session` and to
+# run useradd, hence User=root.
 
 [Unit]
 Description=Multi-user Amazon DCV workstation agent (session provisioning + token verifier)
@@ -14,7 +15,7 @@ Wants=dcvserver.service
 [Service]
 Type=simple
 User=root
-Environment=WSA_VERIFIER_ADDR=127.0.0.1:8444
+Environment=WSA_ADDR=127.0.0.1:8444
 ExecStart=/usr/local/bin/workstation-agent
 Restart=on-failure
 RestartSec=2
