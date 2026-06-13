@@ -1,0 +1,42 @@
+name: Build & Release
+
+permissions:
+  id-token: write
+  contents: write
+  packages: write
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'README.md'
+      - '.gitignore'
+      - 'docs/**'
+      - 'deploy/**'
+  workflow_dispatch:
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0 # full history for GitVersion
+          persist-credentials: true
+
+      - name: Tag with GitVersion
+        id: gitversion
+        uses: michielvha/gitversion-tag-action@main
+        with:
+          configFilePath: gitversion.yml
+
+      # Builds + signs + publishes the linux binaries (zip archives + SHA256SUMS)
+      # as a GitHub Release. The EC2 bootstrap fetches the linux_amd64 zip.
+      - name: Build & Release Go binary
+        uses: michielvha/goreleaser-action@main
+        with:
+          go-version: '1.26'
+          github-token: ${{ github.token }}
+          pgp-private-key: ${{ secrets.PGP_PRIVATE_KEY }}
