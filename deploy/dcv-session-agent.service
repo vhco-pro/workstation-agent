@@ -15,7 +15,7 @@ Wants=dcvserver.service
 [Service]
 Type=simple
 User=root
-Environment=WSA_ADDR=127.0.0.1:8444
+Environment=DSA_ADDR=127.0.0.1:8444
 ExecStart=/usr/local/bin/dcv-session-agent
 Restart=on-failure
 RestartSec=2

@@ -34,7 +34,7 @@ func main() {
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
-	addr := getenv("WSA_ADDR", "127.0.0.1:8444")
+	addr := getenv("DSA_ADDR", "127.0.0.1:8444")
 	// No-redirect client: the verifier re-executes a client-supplied URL, so it
 	// must never follow a 30x to an unvalidated host (SSRF). See verifier.NoRedirectClient.
 	client := verifier.NoRedirectClient(10 * time.Second)
@@ -47,9 +47,9 @@ func main() {
 	mgr := session.NewManager(prov, session.DefaultRunner, log)
 	// Per-user resource caps (MU-10); unset = unlimited.
 	mgr.Limits = session.Limits{
-		CPUQuota:  os.Getenv("WSA_USER_CPU_QUOTA"),
-		MemoryMax: os.Getenv("WSA_USER_MEMORY_MAX"),
-		TasksMax:  os.Getenv("WSA_USER_TASKS_MAX"),
+		CPUQuota:  os.Getenv("DSA_USER_CPU_QUOTA"),
+		MemoryMax: os.Getenv("DSA_USER_MEMORY_MAX"),
+		TasksMax:  os.Getenv("DSA_USER_TASKS_MAX"),
 	}
 
 	// ensure-session is authenticated by the same token the verifier validates,
@@ -64,9 +64,9 @@ func main() {
 	ensure := session.NewHandler(authn, mgr, log)
 
 	// Authorization gate (MU-09 / D3): default allows any validated identity;
-	// tighten with WSA_AUTHZ=group:<name> or allowlist:<path>. Both entry points
+	// tighten with DSA_AUTHZ=group:<name> or allowlist:<path>. Both entry points
 	// (token verify + ensure-session) enforce it.
-	authorizer := authz.Parse(os.Getenv("WSA_AUTHZ"), session.DefaultRunner)
+	authorizer := authz.Parse(os.Getenv("DSA_AUTHZ"), session.DefaultRunner)
 	v.Authz = authorizer
 	ensure.Authz = authorizer
 
@@ -85,8 +85,8 @@ func main() {
 	accountant := &idle.Accountant{
 		Count:       func(ctx context.Context) (int, error) { return session.CountConnections(ctx, session.DefaultRunner) },
 		Stop:        idle.StopSelf(session.DefaultRunner),
-		IdleTimeout: getDuration("WSA_IDLE_TIMEOUT", 30*time.Minute),
-		Interval:    getDuration("WSA_IDLE_INTERVAL", time.Minute),
+		IdleTimeout: getDuration("DSA_IDLE_TIMEOUT", 30*time.Minute),
+		Interval:    getDuration("DSA_IDLE_INTERVAL", time.Minute),
 		Log:         log,
 	}
 	go func() { _ = accountant.Run(context.Background()) }()
@@ -107,7 +107,7 @@ func main() {
 // loopbackOnly rejects any request whose source is not a loopback address. The
 // agent's whole auth model assumes it is reachable only over the loopback (the
 // client's SSM port-forward); this asserts it regardless of the configured bind
-// address, so a `WSA_ADDR=0.0.0.0` misconfiguration cannot expose the verifier
+// address, so a `DSA_ADDR=0.0.0.0` misconfiguration cannot expose the verifier
 // or ensure-session to the network.
 func loopbackOnly(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

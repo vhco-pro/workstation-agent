@@ -29,10 +29,10 @@ func resolveStatus(ctx context.Context) status {
 	return status{
 		Version:      version,
 		Platform:     runtime.GOOS + "/" + runtime.GOARCH,
-		Addr:         getenv("WSA_ADDR", "127.0.0.1:8444"),
+		Addr:         getenv("DSA_ADDR", "127.0.0.1:8444"),
 		Provisioning: prov.Name(),
-		IdleTimeout:  getDuration("WSA_IDLE_TIMEOUT", 30*time.Minute),
-		IdleInterval: getDuration("WSA_IDLE_INTERVAL", time.Minute),
+		IdleTimeout:  getDuration("DSA_IDLE_TIMEOUT", 30*time.Minute),
+		IdleInterval: getDuration("DSA_IDLE_INTERVAL", time.Minute),
 	}
 }
 
@@ -43,7 +43,7 @@ func (s status) String() string {
 	}
 	return fmt.Sprintf(`dcv-session-agent %s (%s)
   listen:        %s
-  provisioning:  %s   (auto-detected; override WSA_PROVISIONING)
+  provisioning:  %s   (auto-detected; override DSA_PROVISIONING)
   idle-stop:     %s
 `, s.Version, s.Platform, s.Addr, s.Provisioning, idle)
 }
