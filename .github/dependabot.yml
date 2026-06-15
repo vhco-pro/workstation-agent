@@ -1,0 +1,26 @@
+version: 2
+updates:
+  # Go module dependencies
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      # build: keeps these out of the goreleaser changelog (feat/fix/perf/refactor only)
+      prefix: build
+    groups:
+      go-deps:
+        patterns:
+          - "*"
+
+  # GitHub Actions used by the release workflow
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+    groups:
+      actions:
+        patterns:
+          - "*"
