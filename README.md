@@ -46,7 +46,7 @@ sequenceDiagram
 
     U->>C: SSO login
     Note over C: STS creds, GetCallerIdentity →<br/>role-session-name → linux user (e.g. dl6544-a)
-    C->>A: SSM tunnel up; POST /ensure-session (user=dl6544-a)
+    C->>A: SSM tunnel up, then POST /ensure-session (user=dl6544-a)
     Note over A: as root — ensure user + home, then<br/>dcv create-session --type virtual --owner dl6544-a
     A-->>C: session ready
     Note over C: presign sts:GetCallerIdentity → opaque token
