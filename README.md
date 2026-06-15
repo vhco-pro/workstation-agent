@@ -4,7 +4,7 @@ A small, dependency-light **Go agent + token verifier** that turns a single self
 
 It is the on-box half of a two-part system; the other half is the [`ssm-connect`](https://github.com/vhco-pro/ssm-connect) macOS client, which opens the SSM tunnel and hands the agent a proof of identity.
 
-> Status: **early** — the design is empirically validated (see [Why this exists](#why-this-exists)); code is being built out phase by phase. Not yet production-ready.
+> Status: **in use** — the full agent is built, and signed release binaries are published on the [releases page](https://github.com/vhco-pro/dcv-session-agent/releases). It runs in production on a self-managed multi-user DCV workstation (token verifier, on-demand virtual-session provisioning, per-user limits, and host-wide idle auto-stop). Pre-1.0, so config/flags may still change.
 
 ## Why this exists
 
@@ -37,23 +37,24 @@ It's the closest off-the-shelf option and it's free — but adopting it means ru
 
 ## How it works
 
-```
-macOS client (ssm-connect)                 EC2 host (this agent)
-──────────────────────────                 ─────────────────────
-1. SSO login → STS creds
-2. GetCallerIdentity → role-session-name
-   → derive linux user "dl6544"
-3. open SSM port-forward ───────────────▶  4. POST /ensure-session {dl6544}
-                                               → ensure user + home + virtual
-                                                 session owned by dl6544  (root)
-5. presign sts:GetCallerIdentity (token)
-6. DCV connect: user=dl6544
-   sessionId=dl6544  authToken=<presigned> ──▶ DCV server
-                                               POST sessionId&authenticationToken
-                                               &clientAddress  ──▶ this agent's verifier
-                                               7. re-execute presigned token → verified ARN
-                                                  → map to "dl6544" → <auth result="yes">
-                                               8. stream dl6544's own desktop
+```mermaid
+sequenceDiagram
+    actor U as You (macOS)
+    participant C as ssm-connect
+    participant D as DCV server
+    participant A as dcv-session-agent
+
+    U->>C: SSO login
+    Note over C: STS creds, GetCallerIdentity →<br/>role-session-name → linux user (e.g. dl6544-a)
+    C->>A: SSM tunnel up; POST /ensure-session (user=dl6544-a)
+    Note over A: as root — ensure user + home, then<br/>dcv create-session --type virtual --owner dl6544-a
+    A-->>C: session ready
+    Note over C: presign sts:GetCallerIdentity → opaque token
+    C->>D: DCV connect (user + sessionId = dl6544-a,<br/>authToken = presigned request)
+    D->>A: POST /validate-authentication-token<br/>(sessionId, authenticationToken, clientAddress)
+    Note over A: re-execute token vs STS → verified ARN →<br/>map to username (SSRF-guarded)
+    A-->>D: auth result = yes, username = dl6544-a
+    D-->>U: stream your own isolated desktop
 ```
 
 Two HTTP surfaces, both reached only over the localhost SSM tunnel (never internet-exposed):
@@ -68,13 +69,35 @@ Two HTTP surfaces, both reached only over the localhost SSM tunnel (never intern
 - **Least privilege & no passwords.** Identity is proven by the AWS credential the SSM tunnel already required; the verifier holds no secret and validates against AWS itself.
 - **Static binary.** Built in Go, no runtime to install on the box, trivial systemd unit.
 
+## Install & configure
+
+Drop the static binary at `/usr/local/bin/dcv-session-agent`, install the unit
+from [`deploy/`](./deploy/dcv-session-agent.service), and `systemctl enable --now
+dcv-session-agent`. It binds **loopback only** and is reached over the client's
+SSM port-forward. (The companion DCV `dcv.conf` points its
+`auth-token-verifier` at `http://127.0.0.1:8444/validate-authentication-token`.)
+
+All configuration is environment variables on the unit (`DSA_` = **D**cv
+**S**ession **A**gent); every one has a safe default:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `DSA_ADDR` | `127.0.0.1:8444` | Listen address. Loopback is enforced regardless — a `0.0.0.0` misconfig cannot expose the verifier. |
+| `DSA_IDLE_TIMEOUT` | `30m` | Power the instance off after this long with zero DCV connections. `0` disables idle auto-stop. |
+| `DSA_IDLE_INTERVAL` | `1m` | How often idle is sampled. |
+| `DSA_PROVISIONING` | auto | User backend: `local` (useradd) or `sssd` (directory). Auto-detected; set to override. |
+| `DSA_AUTHZ` | allow all validated identities | Restrict who may get a session: `group:<name>` or `allowlist:<path>`. |
+| `DSA_USER_CPU_QUOTA` / `DSA_USER_MEMORY_MAX` / `DSA_USER_TASKS_MAX` | unset | Optional per-user systemd-slice resource caps. |
+
 ## Repository layout
 
 ```
-cmd/dcv-session-agent/   entrypoint (HTTP server wiring)
+cmd/dcv-session-agent/   entrypoint (HTTP server wiring + idle accountant goroutine)
 internal/identity/       map verified STS ARN → Linux username (shared rule with the client)
 internal/verifier/       DCV auth-token-verifier contract + presigned-token re-execution (SSRF-guarded)
-internal/session/        provisioning backends (local/sssd, auto-detected) + ensure-session + create-session
+internal/session/        provisioning backends (local/sssd, auto-detected) + ensure-session + create-session + per-user limits
+internal/authz/          optional authorization rules (allow-all / group / allowlist)
+internal/idle/           host-wide idle accounting → instance auto-stop
 deploy/                  systemd unit
 ```
 
